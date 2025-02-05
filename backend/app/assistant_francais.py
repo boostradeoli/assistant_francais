@@ -82,13 +82,19 @@ def query_llm(text: str) -> dict:
     try:
         response = ollama.generate(
             model=LLM_MODEL_NAME,
-            prompt=f"Tu es un assistant intelligent et amical. Réponds de façon claire et concise à cette question : {text}"
+            prompt=f"""Tu es un assistant qui aide les utilisateurs à accomplir des tâches. 
+            Donne une réponse claire et directe en un paragraphe court. 
+            Identifie l'intention parmi : email, visio, photo, imprimer. 
+            Si aucune intention claire n'est détectée, réponds normalement.
+            
+            Utilisateur : {text}
+            Assistant :"""
         )
 
         response_text = response.get("response", "").strip()
         logging.info(f"🤖 Réponse du LLM : {response_text}")
 
-        # Détection des intentions avec des mots-clés
+        # 🔹 Détection des intentions avec des mots-clés
         if any(word in response_text.lower() for word in ["email", "mail"]):
             return {"intention": "email", "response": response_text}
         elif any(word in response_text.lower() for word in ["visioconférence", "appel vidéo"]):
@@ -109,7 +115,7 @@ def verify_response(response_text: str) -> str:
     try:
         response = ollama.generate(
             model=LLM_MODEL_NAME,
-            prompt=f"Vérifie cette réponse et corrige-la si nécessaire : {response_text}"
+            prompt=f"Peux-tu vérifier et corriger cette réponse si nécessaire ? {response_text}"
         )
 
         validated_response = response.get("response", "").strip()
