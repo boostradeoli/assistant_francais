@@ -82,20 +82,20 @@ def query_llm(text: str) -> dict:
     try:
         response = ollama.generate(
             model=LLM_MODEL_NAME,
-            prompt=f"Utilisateur : {text}\nAgent IA :"
+            prompt=f"Tu es un assistant intelligent et amical. Réponds de façon claire et concise à cette question : {text}"
         )
 
-        response_text = response.get("response", "Je ne comprends pas.")
+        response_text = response.get("response", "").strip()
         logging.info(f"🤖 Réponse du LLM : {response_text}")
 
         # Détection des intentions avec des mots-clés
-        if "email" in response_text.lower() or "mail" in response_text.lower():
+        if any(word in response_text.lower() for word in ["email", "mail"]):
             return {"intention": "email", "response": response_text}
-        elif "visioconférence" in response_text.lower() or "appel vidéo" in response_text.lower():
+        elif any(word in response_text.lower() for word in ["visioconférence", "appel vidéo"]):
             return {"intention": "visio", "response": response_text}
         elif "photo" in response_text.lower():
             return {"intention": "photo", "response": response_text}
-        elif "impression" in response_text.lower() or "imprimer" in response_text.lower():
+        elif any(word in response_text.lower() for word in ["impression", "imprimer"]):
             return {"intention": "imprimer", "response": response_text}
         else:
             return {"intention": "unknown", "response": response_text}
@@ -109,13 +109,13 @@ def verify_response(response_text: str) -> str:
     try:
         response = ollama.generate(
             model=LLM_MODEL_NAME,
-            prompt=f"Cette réponse est-elle correcte et utile ? : {response_text}"
+            prompt=f"Vérifie cette réponse et corrige-la si nécessaire : {response_text}"
         )
 
-        validated_response = response.get("response", response_text)
+        validated_response = response.get("response", "").strip()
         logging.info(f"✅ Réponse validée : {validated_response}")
 
-        return validated_response
+        return validated_response if validated_response else response_text
 
     except Exception as e:
         logging.error(f"❌ Erreur de validation avec Ollama : {e}")
