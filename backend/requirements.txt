@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+pydantic
+python-multipart
+pyttsx3
+spacy
+speechrecognition
