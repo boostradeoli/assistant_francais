@@ -1,104 +1,191 @@
-import threading
+# ==========================================
+# 🚀 AGENT IA AVEC RÉFLEXION & VALIDATION
+# ==========================================
+
 import logging
-import speech_recognition as sr
+import time
+import threading
 import pyttsx3
+import speech_recognition as sr
+import ollama  # 📌 Utilisation d'Ollama pour interagir avec le LLM
 
-# Import des modules de gestion (assurez-vous que ces modules existent et qu'ils comportent les fonctions correspondantes)
-from app.services.email import email_module
-from app.services.visio import visio_module
-from app.services.photo import photo_module
-from app.services.printing import printing_module
-from app.services.text_to_speech import tts_module
+from services.email import email_module
+from services.visio import visio_module
+from services.photo import photo_module
+from services.printing import printing_module
 
-# Initialisation de la synthèse vocale avec pyttsx3
-engine = pyttsx3.init()
-engine.setProperty("rate", 150)
-engine.setProperty("volume", 1.0)
+# ==========================================
+# 🔹 INITIALISATION
+# ==========================================
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+
+tts_engine = pyttsx3.init()
+tts_engine.setProperty("rate", 150)
+tts_engine.setProperty("volume", 1.0)
+
+recognizer = sr.Recognizer()
+speech_lock = threading.Lock()
+
+# 🔹 Modèle Ollama utilisé (assure-toi qu'il est bien installé)
+LLM_MODEL_NAME = "tinyllama"
+
+# ==========================================
+# 🔹 FONCTIONS UTILITAIRES
+# ==========================================
 
 def speak(text: str):
-    """
-    Affiche et prononce le texte passé en paramètre.
-    """
-    logging.info("Assistant: " + text)
-    print("Assistant:", text)
-    try:
-        engine.say(text)
-        engine.runAndWait()
-    except Exception as e:
-        logging.error("Erreur TTS: %s", e)
+    """ 🔊 L’agent IA parle et attend la fin avant de continuer. """
+    global tts_engine
+    with speech_lock:
+        logging.info(f"🗣️ Agent IA dit : {text}")
 
-def listen_for_command(timeout: int = 5) -> str:
-    """
-    Écoute la commande vocale pendant un temps donné et renvoie le texte reconnu.
-    """
-    recognizer = sr.Recognizer()
-    with sr.Microphone() as source:
-        print("Écoute...")
-        try:
-            recognizer.adjust_for_ambient_noise(source, duration=1)
-            audio = recognizer.listen(source, timeout=timeout)
-        except sr.WaitTimeoutError:
-            speak("Temps d'attente écoulé, je n'ai rien entendu.")
-            return ""
+        # 🔴 Réinitialisation du moteur pour éviter les blocages
+        tts_engine = pyttsx3.init()
+        tts_engine.setProperty("rate", 150)
+        tts_engine.setProperty("volume", 1.0)
+
+        tts_engine.say(text)
+        tts_engine.runAndWait()
+        time.sleep(1)
+
+def listen() -> str:
+    """ 🎤 Écoute et retourne le texte transcrit. """
+    global recognizer
+    with speech_lock:
+        with sr.Microphone() as source:
+            logging.info("🎤 Écoute...")
+            try:
+                recognizer.adjust_for_ambient_noise(source, duration=1)
+                audio = recognizer.listen(source, timeout=5)
+            except sr.WaitTimeoutError:
+                logging.warning("⏳ Aucun son détecté.")
+                return ""
+
     try:
-        # Reconnaissance vocale avec Google (langue française)
-        command = recognizer.recognize_google(audio, language="fr-FR")
-        print("Vous avez dit:", command)
-        return command.lower()
+        text = recognizer.recognize_google(audio, language="fr-FR")
+        logging.info(f"✅ Reconnu : {text}")
+        return text.lower()
     except sr.UnknownValueError:
-        speak("Je n'ai pas compris, pouvez-vous répéter ?")
+        logging.warning("🔇 Impossible de comprendre.")
+        return ""
     except sr.RequestError as e:
-        speak("Erreur du service de reconnaissance vocale.")
-        logging.error("RequestError: %s", e)
-    return ""
+        logging.error(f"❌ Erreur de reconnaissance vocale : {e}")
+        return ""
 
-def execute_command(command: str):
-    """
-    Détermine l'action à réaliser en fonction de la commande vocale.
-    """
-    if "email" in command or "courriel" in command or "mail" in command:
+# ==========================================
+# 🔹 INTERACTION AVEC LE LLM (OLLAMA)
+# ==========================================
+
+def query_llm(text: str) -> dict:
+    """ 🧠 Envoie la requête au modèle Ollama et récupère la réponse. """
+    try:
+        response = ollama.generate(
+            model=LLM_MODEL_NAME,
+            prompt=f"Utilisateur : {text}\nAgent IA :"
+        )
+
+        response_text = response.get("response", "Je ne comprends pas.")
+        logging.info(f"🤖 Réponse du LLM : {response_text}")
+
+        # Détection des intentions avec des mots-clés
+        if "email" in response_text.lower() or "mail" in response_text.lower():
+            return {"intention": "email", "response": response_text}
+        elif "visioconférence" in response_text.lower() or "appel vidéo" in response_text.lower():
+            return {"intention": "visio", "response": response_text}
+        elif "photo" in response_text.lower():
+            return {"intention": "photo", "response": response_text}
+        elif "impression" in response_text.lower() or "imprimer" in response_text.lower():
+            return {"intention": "imprimer", "response": response_text}
+        else:
+            return {"intention": "unknown", "response": response_text}
+
+    except Exception as e:
+        logging.error(f"❌ Erreur avec Ollama : {e}")
+        return {"intention": "unknown", "response": "Je ne peux pas traiter cette requête pour le moment."}
+
+def verify_response(response_text: str) -> str:
+    """ 🧐 Vérifie la réponse générée pour s'assurer qu'elle est correcte. """
+    try:
+        response = ollama.generate(
+            model=LLM_MODEL_NAME,
+            prompt=f"Cette réponse est-elle correcte et utile ? : {response_text}"
+        )
+
+        validated_response = response.get("response", response_text)
+        logging.info(f"✅ Réponse validée : {validated_response}")
+
+        return validated_response
+
+    except Exception as e:
+        logging.error(f"❌ Erreur de validation avec Ollama : {e}")
+        return response_text
+
+# ==========================================
+# 🔹 EXÉCUTION DES COMMANDES
+# ==========================================
+
+def execute_command(intent: str):
+    """ ⚡ Exécute l'action correspondant à l'intention détectée. """
+    logging.info(f"🚀 Exécution de l'action pour l'intention : {intent}")
+
+    if intent == "email":
         speak("J'ouvre votre messagerie pour écrire un email.")
+        time.sleep(1)
         email_module.compose_email()
-    elif "visio" in command or "visioconférence" in command or "appel vidéo" in command:
+    elif intent == "visio":
         speak("Je démarre la visioconférence.")
+        time.sleep(1)
         visio_module.start_visio()
-    elif "photo" in command or "image" in command:
+    elif intent == "photo":
         speak("J'ouvre votre dossier de photos.")
+        time.sleep(1)
         photo_module.view_photos()
-    elif "imprimer" in command:
+    elif intent == "imprimer":
         speak("Je prépare l'impression du document.")
+        time.sleep(1)
         printing_module.print_document()
     else:
-        speak("Commande non reconnue, veuillez réessayer.")
+        speak("Désolé, cette action n’est pas encore supportée.")
 
-def ask_continue() -> bool:
-    """
-    Demande à l'utilisateur s'il souhaite continuer et renvoie True si la réponse contient 'oui'.
-    """
-    speak("Voulez-vous faire autre chose ?")
-    answer = listen_for_command(timeout=3)
-    return "oui" in answer
+# ==========================================
+# 🔹 BOUCLE PRINCIPALE
+# ==========================================
 
-def assistant_loop():
-    """
-    Boucle principale de l'assistant vocal.
-    """
+def run_agent():
+    """ 🔄 Agent IA : Écoute → Envoie au LLM → Vérifie → Répond → Agit. """
     speak("Bonjour, comment puis-je vous aider ?")
+
     while True:
-        command = listen_for_command()
-        if command:
-            execute_command(command)
-        if not ask_continue():
+        user_input = listen()
+        if not user_input:
+            speak("Je ne vous ai pas bien entendu. Pouvez-vous répéter ?")
+            continue
+
+        # 🔹 Envoie au LLM principal
+        llm_response = query_llm(user_input)
+        intent = llm_response["intention"]
+        response_text = llm_response["response"]
+
+        # 🔹 Vérification de la réponse
+        validated_response = verify_response(response_text)
+
+        # 🔹 L'agent IA parle uniquement après validation
+        speak(validated_response)
+
+        if intent != "unknown":
+            execute_command(intent)
+
+        # 🔹 Vérifie si l'utilisateur veut continuer
+        speak("Voulez-vous faire autre chose ?")
+        continue_input = listen()
+        if "non" in continue_input:
             speak("D'accord, à bientôt !")
             break
 
-def run_assistant():
-    """
-    Fonction d'activation de l'assistant vocal.
-    """
-    assistant_thread = threading.Thread(target=assistant_loop, daemon=True)
-    assistant_thread.start()
-    assistant_thread.join()  # On attend que la boucle se termine
+# ==========================================
+# 🔹 LANCEMENT
+# ==========================================
 
 if __name__ == "__main__":
-    run_assistant()
+    run_agent()
